@@ -1,20 +1,11 @@
 """
-utils.py
 Shared utility functions used across the wildflower tracking pipeline.
 """
-
-from __future__ import annotations
-
 import csv
 import logging
-import os
 from datetime import datetime
 from pathlib import Path
 
-
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
 
 def get_logger(name: str) -> logging.Logger:
     """Return a consistently formatted logger."""
@@ -30,10 +21,6 @@ def get_logger(name: str) -> logging.Logger:
         logger.setLevel(logging.INFO)
     return logger
 
-
-# ---------------------------------------------------------------------------
-# Path helpers
-# ---------------------------------------------------------------------------
 
 def project_root() -> Path:
     """Return the project root (parent of the scripts directory)."""
@@ -57,18 +44,9 @@ def timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-# ---------------------------------------------------------------------------
-# Directory discovery
-# ---------------------------------------------------------------------------
-
 def latest_subdirectory(parent: Path | str) -> Path:
     """
     Return the most recently modified subdirectory inside *parent*.
-
-    Raises
-    ------
-    FileNotFoundError
-        If *parent* does not exist or contains no subdirectories.
     """
     parent = Path(parent)
     subdirs = [p for p in parent.iterdir() if p.is_dir()]
@@ -80,11 +58,6 @@ def latest_subdirectory(parent: Path | str) -> Path:
 def two_most_recent_files(directory: Path | str, pattern: str = "*.csv") -> tuple[Path, Path]:
     """
     Return the two most recently modified files matching *pattern* in *directory*.
-
-    Raises
-    ------
-    ValueError
-        If fewer than two matching files exist.
     """
     directory = Path(directory)
     files = sorted(directory.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -95,16 +68,9 @@ def two_most_recent_files(directory: Path | str, pattern: str = "*.csv") -> tupl
     return files[0], files[1]
 
 
-# ---------------------------------------------------------------------------
-# Species tag lookup
-# ---------------------------------------------------------------------------
-
 def load_species_tags(csv_path: Path | str) -> dict[str, str]:
     """
-    Load species_tags.csv and return a mapping of species_name → status.
-
-    Expected CSV columns: species_name, status
-    Status values should be: 'native', 'invasive', or left blank (→ 'unknown').
+    Load species_tags.csv and return a mapping of species_name → status (native, introduced, unknown).
     """
     csv_path = Path(csv_path)
     mapping: dict[str, str] = {}
@@ -121,13 +87,9 @@ def load_species_tags(csv_path: Path | str) -> dict[str, str]:
 
 
 def lookup_status(species_name: str, species_tags: dict[str, str]) -> str:
-    """Return native/invasive/unknown for a given species name."""
+    """Return native/introduced/unknown for a given species name."""
     return species_tags.get(species_name.strip().lower(), "unknown")
 
-
-# ---------------------------------------------------------------------------
-# Image helpers
-# ---------------------------------------------------------------------------
 
 SUPPORTED_IMAGE_EXTENSIONS: frozenset[str] = frozenset(
     {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}

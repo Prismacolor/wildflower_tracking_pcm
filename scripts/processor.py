@@ -16,7 +16,7 @@ from pathlib import Path
 import cv2
 
 from scripts import config
-from models.plant_classifier import PlantClassifier
+from scripts.plant_classifier import PlantClassifier
 from scripts.utils import (
     collect_images,
     ensure_dir,

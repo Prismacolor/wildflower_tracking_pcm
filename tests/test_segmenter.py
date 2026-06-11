@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-from models.processor import PredictionPipeline, SlidingWindowSegmenter
+from scripts.processor import PredictionPipeline, SlidingWindowSegmenter
 
 
 # ---------------------------------------------------------------------------

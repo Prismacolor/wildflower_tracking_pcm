@@ -1,5 +1,4 @@
 """
-main.py
 Top-level orchestration script for the wildflower tracking pipeline.
 
 Subcommands
@@ -14,63 +13,59 @@ evaluate    — Evaluate model on iNat validation data
 download    — Download iNat photos for North Texas
 full        — Run extract → segment → predict → charts in sequence
 
-Usage (from project root):
-    python -m scripts.main <subcommand>
+Usage (from project root): python -m scripts.main <subcommand>
 """
-
-from __future__ import annotations
 
 import argparse
 import sys
 
-from scripts.utils import get_logger
+from scripts import config
+from utils.utils import get_logger, latest_subdirectory, timestamp
+from scripts.extractor import VideoExtractor
+from scripts.processor import SlidingWindowSegmenter, PredictionPipeline
+from scripts.plant_classifier import PlantClassifier
+from visualizations.charts import main as charts_main
+from visualizations.spread_tracker import main as spread_main
+from utils.setup_inat import INatDownloader
+
 
 logger = get_logger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Subcommand handlers
-# ---------------------------------------------------------------------------
-
 def cmd_extract(_args: argparse.Namespace) -> None:
-    from models.extractor import VideoExtractor
+    """Build the video extractor"""
     VideoExtractor().run()
 
 
 def cmd_segment(_args: argparse.Namespace) -> None:
-    from models.processor import SlidingWindowSegmenter
-    from scripts import config
-    from scripts.utils import latest_subdirectory, timestamp
-
+    """build the segmentation class"""
     stills_dir = latest_subdirectory(config.STILLS_DIR)
     out_dir = config.SEGMENTED_DIR / f"segments_{timestamp()}"
     SlidingWindowSegmenter().segment_directory(stills_dir, out_dir)
 
 
 def cmd_predict(_args: argparse.Namespace) -> None:
-    from models.processor import PredictionPipeline
+    """Inference"""
     report = PredictionPipeline().run()
     print(f"Results: {report}")
 
 
 def cmd_charts(_args: argparse.Namespace) -> None:
-    from visualizations.charts import main as charts_main
+    """Build the visualization charts"""
     charts_main()
 
 
 def cmd_spread(_args: argparse.Namespace) -> None:
-    from visualizations.spread_tracker import main as spread_main
+    """Track the spread"""
     spread_main()
 
 
 def cmd_train(_args: argparse.Namespace) -> None:
-    from models.plant_classifier import PlantClassifier
-    from scripts import config
+    """Train the plant classifier"""
     PlantClassifier().train(data_dir=config.INAT_DIR)
 
 
 def cmd_evaluate(_args: argparse.Namespace) -> None:
-    from models.plant_classifier import PlantClassifier
+    """Evaluate the Classifier model"""
     clf = PlantClassifier()
     clf.load()
     metrics = clf.evaluate()
@@ -78,7 +73,7 @@ def cmd_evaluate(_args: argparse.Namespace) -> None:
 
 
 def cmd_download(_args: argparse.Namespace) -> None:
-    from scripts.setup_inat import INatDownloader
+    """Download iNat data"""
     INatDownloader().run()
 
 
@@ -98,10 +93,6 @@ def cmd_full(_args: argparse.Namespace) -> None:
 
     logger.info("Pipeline complete.")
 
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 _COMMANDS = {
     "extract": cmd_extract,

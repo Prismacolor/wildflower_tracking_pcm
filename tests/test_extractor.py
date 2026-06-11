@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from models.extractor import VideoExtractor
+from scripts.extractor import VideoExtractor
 
 
 def _make_extractor(tmp_path: Path) -> tuple[VideoExtractor, Path, Path]:

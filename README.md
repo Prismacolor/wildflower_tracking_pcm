@@ -1,13 +1,13 @@
 # Wildflower Tracking PCM
 
-Prairie restoration plant tracking system for Prairie Creek.  
+Prairie plant tracking system for Prairie Creek.  
 Processes field videos → still frames → segmented patches → CNN species identification → native/invasive distribution reports and trend visualisations.
 
 ---
 
 ## Project Overview
 
-<!-- Describe your prairie restoration project here -->
+This project is to track the spread of both native and invasive species over time within a prairie restoration project. This has currently been designed with Prairie Creek Marsh in mind but could be used on other restoration projects with the right data. 
 
 ---
 

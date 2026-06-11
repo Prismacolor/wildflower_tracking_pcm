@@ -1,30 +1,24 @@
 """
-extractor.py
 Converts video files into still frames using OpenCV.
-
-Usage (from project root):
-    python -m scripts.extractor
 """
-
-from __future__ import annotations
 
 import cv2
 from pathlib import Path
 
 from scripts import config
-from scripts.utils import (
+from utils.utils import (
     datestamp,
     ensure_dir,
     get_logger,
     latest_subdirectory,
 )
 
+
 logger = get_logger(__name__)
 
 
 class VideoExtractor:
     """Extract still frames from every video in a source directory."""
-
     def __init__(
         self,
         videos_dir: Path = config.VIDEOS_DIR,
@@ -37,9 +31,6 @@ class VideoExtractor:
         self.fps = fps
         self.image_format = image_format
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def run(self) -> Path:
         """
@@ -72,9 +63,6 @@ class VideoExtractor:
         logger.info("Extraction complete. Total frames saved: %d", total_frames)
         return output_dir
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _extract_frames(self, video_path: Path, output_dir: Path) -> int:
         """
@@ -106,10 +94,6 @@ class VideoExtractor:
         cap.release()
         return saved
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 def main() -> None:
     extractor = VideoExtractor()

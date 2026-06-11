@@ -12,7 +12,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from models.processor import PredictionPipeline, SlidingWindowSegmenter
+from scripts.processor import PredictionPipeline, SlidingWindowSegmenter
 
 
 @pytest.fixture()

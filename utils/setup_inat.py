@@ -1,28 +1,21 @@
 """
-setup_inat.py
 Downloads iNaturalist research-grade plant observations (with photos) for a
 North Texas bounding box and saves them into data/iNat_data/<species_name>/.
-
-Usage (from project root):
-    python -m scripts.setup_inat
 """
-
-from __future__ import annotations
 
 import time
 import urllib.request
 from pathlib import Path
-
 import requests
 
 from scripts import config
-from scripts.utils import ensure_dir, get_logger
+from utils import ensure_dir, get_logger
 
 logger = get_logger(__name__)
 
 _OBSERVATIONS_ENDPOINT = f"{config.INAT_API_BASE}/observations"
 _PAGE_SIZE = 200
-_REQUEST_DELAY = 1.0   # seconds between API calls — be polite to iNat
+_REQUEST_DELAY = 1.0   # seconds between API calls — avoid flooding the system
 
 
 class INatDownloader:
@@ -45,9 +38,6 @@ class INatDownloader:
         self.max_photos = max_photos_per_species
         self.quality_grade = quality_grade
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def run(self) -> None:
         """Download photos for all species found in the bounding box."""
@@ -65,9 +55,6 @@ class INatDownloader:
 
         logger.info("iNat download complete.")
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _fetch_all_observations(self) -> list[dict]:
         """Page through the iNat API and return all matching observations."""
@@ -156,10 +143,6 @@ class INatDownloader:
 
         logger.info("  %s — downloaded %d new photos (%d already present)", species, downloaded, existing)
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 def main() -> None:
     downloader = INatDownloader()
