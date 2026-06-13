@@ -1,24 +1,22 @@
 """
-plant_classifier.py
 CNN-based plant classifier built on TensorFlow/Keras.
 
 The PlantClassifier class wraps all model creation, training, evaluation,
-prediction, and persistence logic.  Import it from main.py or processor.py.
+prediction, and persistence logic.
 """
-
-from __future__ import annotations
 
 import json
 import numpy as np
 from pathlib import Path
 from typing import Optional
+import cv2
 
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
 from scripts import config
-from scripts.utils import ensure_dir, get_logger
+from utils.utils import ensure_dir, get_logger
 
 logger = get_logger(__name__)
 
@@ -30,7 +28,7 @@ class PlantClassifier:
     Architecture
     ------------
     Three convolutional blocks (Conv → BatchNorm → MaxPool → Dropout)
-    followed by a dense head.  Kept deliberately shallow to avoid
+    Kept deliberately shallow to avoid
     overfitting on limited iNat training data.
 
     Parameters
@@ -57,10 +55,6 @@ class PlantClassifier:
         self.class_names: list[str] = []
         self._class_index_path = self.model_path.parent / "class_index.json"
 
-    # ------------------------------------------------------------------
-    # Training
-    # ------------------------------------------------------------------
-
     def train(
         self,
         data_dir: Path = config.INAT_DIR,
@@ -85,8 +79,8 @@ class PlantClassifier:
         self.model = self._build_model(num_classes, learning_rate)
 
         callbacks = [
-            keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True),
-            keras.callbacks.ReduceLROnPlateau(factor=0.5, patience=3),
+            keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True),  # stops training before overfitting
+            keras.callbacks.ReduceLROnPlateau(factor=0.5, patience=3),  # reduces learning rate when metrics plateau
         ]
 
         history = self.model.fit(
@@ -100,13 +94,9 @@ class PlantClassifier:
         logger.info("Training complete. Model saved to %s", self.model_path)
         return history
 
-    # ------------------------------------------------------------------
-    # Evaluation
-    # ------------------------------------------------------------------
-
     def evaluate(self, data_dir: Path = config.INAT_DIR, batch_size: int = config.BATCH_SIZE) -> dict[str, float]:
         """
-        Evaluate the model on a held-out validation split.
+        Evaluate the model on a validation set.
         Returns a dict with 'loss' and 'accuracy'.
         """
         self._require_model()
@@ -116,9 +106,6 @@ class PlantClassifier:
         logger.info("Evaluation — loss: %.4f  accuracy: %.4f", loss, accuracy)
         return metrics
 
-    # ------------------------------------------------------------------
-    # Prediction
-    # ------------------------------------------------------------------
 
     def predict_image(self, image: np.ndarray) -> tuple[str, float]:
         """
@@ -147,10 +134,6 @@ class PlantClassifier:
         """Run predict_image over a list of images."""
         return [self.predict_image(img) for img in images]
 
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
-
     def load(self) -> None:
         """Load a previously trained model and class index from disk."""
         if not self.model_path.exists():
@@ -159,10 +142,6 @@ class PlantClassifier:
         with self._class_index_path.open() as fh:
             self.class_names = json.load(fh)
         logger.info("Model loaded from %s (%d classes)", self.model_path, len(self.class_names))
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _build_datasets(
         self,
@@ -246,7 +225,6 @@ class PlantClassifier:
 
     def _preprocess(self, image: np.ndarray) -> np.ndarray:
         """Resize and normalise a single image to model input shape."""
-        import cv2
         h, w = self.input_size
         resized = cv2.resize(image, (w, h))
         return resized.astype(np.float32) / 255.0

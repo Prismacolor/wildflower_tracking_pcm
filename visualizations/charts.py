@@ -5,9 +5,6 @@ Generates distribution charts and run-to-run comparison bar graphs.
 Usage (from project root):
     python -m visualizations.charts
 """
-
-from __future__ import annotations
-
 import csv
 from pathlib import Path
 
@@ -15,8 +12,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from scripts import config
-from scripts.results_evaluator import ResultsComparator
-from scripts.utils import ensure_dir, get_logger, timestamp, two_most_recent_files
+from scripts.results_evaluator import ResultsEvaluator
+from utils.utils import ensure_dir, get_logger, timestamp, two_most_recent_files
 
 logger = get_logger(__name__)
 
@@ -49,10 +46,7 @@ def _load_results(csv_path: Path) -> list[dict]:
     return rows
 
 
-# ---------------------------------------------------------------------------
 # Chart 1 — Native vs invasive distribution (stacked / grouped)
-# ---------------------------------------------------------------------------
-
 def plot_native_vs_invasive(results_path: Path | None = None, save_dir: Path = config.ARTIFACTS_DIR) -> Path:
     """
     Horizontal bar chart showing native / invasive / unknown proportions.
@@ -86,10 +80,7 @@ def plot_native_vs_invasive(results_path: Path | None = None, save_dir: Path = c
     return out
 
 
-# ---------------------------------------------------------------------------
 # Chart 2 — Top-N species by distribution
-# ---------------------------------------------------------------------------
-
 def plot_top_species(
     results_path: Path | None = None,
     top_n: int = config.TOP_N_SPECIES,
@@ -127,10 +118,7 @@ def plot_top_species(
     return out
 
 
-# ---------------------------------------------------------------------------
 # Chart 3 — Run-to-run comparison (top-N species, grouped bars)
-# ---------------------------------------------------------------------------
-
 def plot_run_comparison(
     top_n: int = config.COMPARE_TOP_N,
     save_dir: Path = config.TREND_CHARTS_DIR,
@@ -140,7 +128,7 @@ def plot_run_comparison(
     recent result runs.  Returns the saved file path.
     """
     ensure_dir(save_dir)
-    comparator = ResultsComparator()
+    comparator = ResultsEvaluator()
     diff = comparator.compare_latest()
 
     # Sort by maximum percentage across both runs; take top_n
@@ -178,17 +166,14 @@ def plot_run_comparison(
     return out
 
 
-# ---------------------------------------------------------------------------
 # Text comparison report
-# ---------------------------------------------------------------------------
-
 def generate_comparison_report(save_dir: Path = config.RESULTS_DIR) -> Path:
     """
     Write a plain-text comparison report for the two most recent runs.
     Returns the saved file path.
     """
     ensure_dir(save_dir)
-    comparator = ResultsComparator()
+    comparator = ResultsEvaluator()
     diff = comparator.compare_latest()
 
     ts = timestamp()
@@ -234,10 +219,6 @@ def generate_comparison_report(save_dir: Path = config.RESULTS_DIR) -> Path:
     logger.info("Comparison report saved: %s", report_path)
     return report_path
 
-
-# ---------------------------------------------------------------------------
-# Entry point — generate all charts and report in one call
-# ---------------------------------------------------------------------------
 
 def main() -> None:
     ensure_dir(config.ARTIFACTS_DIR)

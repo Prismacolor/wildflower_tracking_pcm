@@ -7,18 +7,15 @@ Usage (from project root):
     python -m visualizations.spread_tracker
 """
 
-from __future__ import annotations
-
 import csv
 import re
 from pathlib import Path
-
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
 from scripts import config
-from scripts.utils import ensure_dir, get_logger, timestamp
+from utils.utils import ensure_dir, get_logger, timestamp
 
 logger = get_logger(__name__)
 
@@ -52,10 +49,6 @@ def _load_all_results(results_dir: Path) -> pd.DataFrame:
         raise FileNotFoundError("No results CSVs found.")
     return pd.DataFrame(frames)
 
-
-# ---------------------------------------------------------------------------
-# Chart — status totals over time (line plot)
-# ---------------------------------------------------------------------------
 
 def plot_status_over_time(
     results_dir: Path = config.RESULTS_DIR,
@@ -102,10 +95,6 @@ def plot_status_over_time(
     return out
 
 
-# ---------------------------------------------------------------------------
-# Chart — species-level spread heatmap
-# ---------------------------------------------------------------------------
-
 def plot_species_heatmap(
     results_dir: Path = config.RESULTS_DIR,
     save_dir: Path = config.TREND_CHARTS_DIR,
@@ -140,10 +129,6 @@ def plot_species_heatmap(
     logger.info("Saved: %s", out)
     return out
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 def main() -> None:
     try:

@@ -1,19 +1,12 @@
 """
-results_evaluator.py
 Loads two results CSVs and computes the change in species distribution
 between runs.
-
-Usage (from project root):
-    python -m scripts.calculator
 """
-
-from __future__ import annotations
-
 import csv
 from pathlib import Path
 
 from scripts import config
-from scripts.utils import get_logger, two_most_recent_files
+from utils.utils import get_logger, two_most_recent_files
 
 logger = get_logger(__name__)
 
@@ -26,10 +19,6 @@ class ResultsEvaluator:
 
     def __init__(self, results_dir: Path = config.RESULTS_DIR) -> None:
         self.results_dir = Path(results_dir)
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def compare_latest(self) -> dict:
         """
@@ -95,10 +84,6 @@ class ResultsEvaluator:
             "all_species": all_rows,
         }
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _load_csv(path: Path) -> dict[str, dict]:
         """Load a results CSV and return a dict keyed by species name."""
@@ -113,10 +98,6 @@ class ResultsEvaluator:
                 }
         return data
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 def main() -> None:
     evaluator = ResultsEvaluator()

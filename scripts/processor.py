@@ -1,23 +1,16 @@
 """
-processor.py
 Sliding-window segmentation of prairie stills into individual plant patches,
 and pipeline to run patches through the PlantClassifier.
-
-Usage (from project root):
-    python -m scripts.processor
 """
-
-from __future__ import annotations
 
 import csv
 from collections import Counter
 from pathlib import Path
-
 import cv2
 
 from scripts import config
 from scripts.plant_classifier import PlantClassifier
-from scripts.utils import (
+from utils.utils import (
     collect_images,
     ensure_dir,
     get_logger,
@@ -27,12 +20,8 @@ from scripts.utils import (
     timestamp,
 )
 
+
 logger = get_logger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Segmenter
-# ---------------------------------------------------------------------------
 
 class SlidingWindowSegmenter:
     """
@@ -96,10 +85,6 @@ class SlidingWindowSegmenter:
         return all_patches
 
 
-# ---------------------------------------------------------------------------
-# Prediction pipeline
-# ---------------------------------------------------------------------------
-
 class PredictionPipeline:
     """
     Loads the most recent segmented patch directory, runs each patch through
@@ -134,9 +119,6 @@ class PredictionPipeline:
         report_path = self._save_report(predictions)
         return report_path
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _classify_patches(self, patches: list[Path]) -> list[dict]:
         """Classify each patch and return a list of result dicts."""
@@ -185,10 +167,6 @@ class PredictionPipeline:
         return report_path
 
 
-# ---------------------------------------------------------------------------
-# Convenience runner — segment then predict
-# ---------------------------------------------------------------------------
-
 class SegmentAndPredict:
     """Orchestrates segmentation → prediction in one call."""
 
@@ -202,10 +180,6 @@ class SegmentAndPredict:
         self.segmenter.segment_directory(stills_dir, output_dir)
         return self.pipeline.run()
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 def main() -> None:
     runner = SegmentAndPredict()
