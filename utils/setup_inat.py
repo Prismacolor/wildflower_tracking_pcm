@@ -7,9 +7,11 @@ import time
 import urllib.request
 from pathlib import Path
 import requests
+import csv
+from tqdm import tqdm
 
 from scripts import config
-from utils import ensure_dir, get_logger
+from utils.utils import ensure_dir, get_logger, load_species_tags
 
 logger = get_logger(__name__)
 
@@ -38,20 +40,20 @@ class INatDownloader:
         self.max_photos = max_photos_per_species
         self.quality_grade = quality_grade
 
-
     def run(self) -> None:
-        """Download photos for all species found in the bounding box."""
         ensure_dir(self.output_dir)
-        logger.info("Starting iNat download — bounding box: %s", self.bbox)
+        logger.info(f"Starting iNat download — bounding box: {self.bbox}")
 
         observations = self._fetch_all_observations()
-        logger.info("Fetched %d observations.", len(observations))
+        logger.info(f"Fetched {len(observations)} observations.")
 
         species_map = self._group_by_species(observations)
-        logger.info("Unique species found: %d", len(species_map))
+        logger.info(f"Unique species found: {len(species_map)}")
 
-        for species, photo_urls in species_map.items():
-            self._download_species_photos(species, photo_urls)
+        self._update_species_tags(species_map)
+
+        for species, data in tqdm(species_map.items(), desc="Downloading species", unit="species"):
+            self._download_species_photos(species, data["urls"])
 
         logger.info("iNat download complete.")
 
@@ -75,7 +77,15 @@ class INatDownloader:
             }
 
             response = requests.get(_OBSERVATIONS_ENDPOINT, params=params, timeout=30)
+            if response.status_code == 403: # we have hit the 10k limit for iNat
+                logger.info("We have hit the 10k download limit for iNat, stopping download...")
+                break
+            elif response.status_code != 200:  # catch any other http errors
+                logger.warning(f"Error while downloading: {response.status_code}")
+                continue
+
             response.raise_for_status()
+
             data = response.json()
 
             results = data.get("results", [])
@@ -83,7 +93,7 @@ class INatDownloader:
                 break
 
             observations.extend(results)
-            logger.info("  Page %d: %d observations (total so far: %d)", page, len(results), len(observations))
+            logger.info(f"  Page {page}: {len(results)} observations (total so far: {len(observations)})")
 
             if len(observations) >= data.get("total_results", 0):
                 break
@@ -93,36 +103,67 @@ class INatDownloader:
 
         return observations
 
-    def _group_by_species(self, observations: list[dict]) -> dict[str, list[str]]:
+    def _group_by_species(self, observations: list[dict]) -> dict[str, dict]:
         """
-        Return a dict mapping species_name → list of photo URLs.
+        Return a dict mapping species_name -> {urls: [...], status: str}.
         Caps each species at self.max_photos.
         """
-        species_map: dict[str, list[str]] = {}
+        species_map: dict[str, dict] = {}
 
         for obs in observations:
             taxon = obs.get("taxon")
             if not taxon:
                 continue
 
-            name: str = (
-                taxon.get("name", "").strip().replace(" ", "_").lower()
-            )
+            name: str = taxon.get("name", "").strip().replace(" ", "_").lower()
             if not name:
                 continue
 
+            establishment = taxon.get("establishment_means", {}) or {}
+            status = establishment.get("establishment_means", "").lower()
+            if status == "introduced":
+                status = "invasive"
+            elif status not in ("native", "endemic"):
+                status = ""
+
             photos = obs.get("photos", [])
+            species_map.setdefault(name, {"urls": [], "status": status})
             for photo in photos:
                 url = photo.get("url", "")
                 if not url:
                     continue
-                # iNat thumbnail URLs end in /square — swap for /large
                 url = url.replace("/square", "/large")
-                species_map.setdefault(name, [])
-                if len(species_map[name]) < self.max_photos:
-                    species_map[name].append(url)
+                if len(species_map[name]["urls"]) < self.max_photos:
+                    species_map[name]["urls"].append(url)
 
         return species_map
+
+    def _update_species_tags(self, species_map: dict[str, dict]) -> None:
+        """
+        Write any newly discovered species and their iNat status into
+        species_tags.csv. Existing rows are preserved and never overwritten.
+        """
+        csv_path = config.SPECIES_TAGS_CSV
+        existing = load_species_tags(csv_path)
+
+        new_rows = []
+        for name, data in species_map.items():
+            readable_name = name.replace("_", " ")
+            if readable_name not in existing:
+                new_rows.append({
+                    "species_name": readable_name,
+                    "status": data["status"],
+                })
+
+        if not new_rows:
+            logger.info("species_tags.csv is already up to date.")
+            return
+
+        with csv_path.open("a", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=["species_name", "status"])
+            writer.writerows(new_rows)
+
+        logger.info(f"Added {len(new_rows)} new species to species_tags.csv.")
 
     def _download_species_photos(self, species: str, urls: list[str]) -> None:
         """Download photos for a single species into its own subdirectory."""
@@ -137,11 +178,11 @@ class INatDownloader:
             try:
                 urllib.request.urlretrieve(url, dest)
                 downloaded += 1
-                time.sleep(0.2)   # light throttle for photo downloads
-            except Exception as exc:   # noqa: BLE001
-                logger.warning("Failed to download %s: %s", url, exc)
+                time.sleep(0.2)
+            except Exception as exc:
+                logger.warning(f"Failed to download {url}: {exc}")
 
-        logger.info("  %s — downloaded %d new photos (%d already present)", species, downloaded, existing)
+        logger.info(f"{species} — downloaded {downloaded} new photos ({existing} already present)")
 
 
 def main() -> None:

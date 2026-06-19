@@ -1,10 +1,6 @@
 """
-spread_tracker.py  (visualizations/spread_tracker.py)
 Tracks and visualises the spread of native vs invasive plants over time
 by reading all results CSVs from the results directory.
-
-Usage (from project root):
-    python -m visualizations.spread_tracker
 """
 
 import csv

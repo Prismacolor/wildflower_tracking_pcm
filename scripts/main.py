@@ -10,6 +10,8 @@ charts      — Generate distribution charts and comparison report
 spread      — Generate spread-over-time charts
 train       — (Re)train the plant classifier on iNat data
 evaluate    — Evaluate model on iNat validation data
+model       - Run full model pipeline
+spread_charts - Run full chart pipeline
 download    — Download iNat photos for North Texas
 full        — Run extract → segment → predict → charts in sequence
 
@@ -77,6 +79,19 @@ def cmd_download(_args: argparse.Namespace) -> None:
     INatDownloader().run()
 
 
+def cmd_model_pipeline(_args:argparse.Namespace) -> None:
+    """Sometimes segmentation takes a while so it is run separately. Might want separate smaller pipelines."""
+    cmd_train(_args)
+    cmd_evaluate(_args)
+    cmd_predict(_args)
+
+
+def cmd_chart_spread(_args: argparse.Namespace) -> None:
+    """Sometimes segmentation takes a while so it is run separately. Might want separate smaller pipelines."""
+    cmd_charts(_args)
+    cmd_spread(_args)
+
+
 def cmd_full(_args: argparse.Namespace) -> None:
     """End-to-end: extract → segment → predict → charts."""
     logger.info("=== Step 1/4: Extract frames ===")
@@ -103,6 +118,8 @@ _COMMANDS = {
     "train": cmd_train,
     "evaluate": cmd_evaluate,
     "download": cmd_download,
+    "model": cmd_model_pipeline,
+    "spread_charts": cmd_chart_spread,
     "full": cmd_full,
 }
 

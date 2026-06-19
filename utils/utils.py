@@ -3,8 +3,10 @@ Shared utility functions used across the wildflower tracking pipeline.
 """
 import csv
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
+
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -104,3 +106,46 @@ def collect_images(directory: Path | str) -> list[Path]:
         for p in directory.rglob("*")
         if p.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
     ]
+
+
+def filter_sparse_classes(data_dir: Path, min_samples: int = 3) -> list[str]:
+    """
+    Identify species subdirectories with fewer than min_samples images.
+    Does NOT delete anything — just returns the list of sparse species names.
+    """
+    sparse = []
+    for species_dir in Path(data_dir).iterdir():
+        if not species_dir.is_dir():
+            continue
+        count = len(collect_images(species_dir))
+        if count < min_samples:
+            sparse.append(species_dir.name)
+    return sparse
+
+
+def build_filtered_training_dir(
+    source_dir: Path, working_dir: Path, min_samples: int = 3
+    ) -> Path:
+    """
+    Create a temporary directory containing markers to only the species
+    folders that meet min_samples. Returns the working directory path.
+    Safe to call repeatedly — clears and rebuilds working_dir each time.
+    """
+    import shutil
+
+    working_dir = Path(working_dir)
+    if working_dir.exists():
+        shutil.rmtree(working_dir)
+    ensure_dir(working_dir)
+
+    sparse = set(filter_sparse_classes(source_dir, min_samples))
+    included = 0
+
+    for species_dir in Path(source_dir).iterdir():
+        if not species_dir.is_dir() or species_dir.name in sparse:
+            continue
+        link_path = working_dir / species_dir.name
+        os.symlink(species_dir.resolve(), link_path, target_is_directory=True)
+        included += 1
+
+    return working_dir

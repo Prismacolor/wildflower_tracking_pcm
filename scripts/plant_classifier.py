@@ -16,7 +16,7 @@ from tensorflow import keras
 from tensorflow.keras import layers
 
 from scripts import config
-from utils.utils import ensure_dir, get_logger
+from utils.utils import ensure_dir, get_logger, filter_sparse_classes, build_filtered_training_dir
 
 logger = get_logger(__name__)
 
@@ -62,6 +62,7 @@ class PlantClassifier:
         batch_size: int = config.BATCH_SIZE,
         validation_split: float = config.VALIDATION_SPLIT,
         learning_rate: float = config.LEARNING_RATE,
+        min_samples_per_species: int = 3
     ) -> keras.callbacks.History:
         """
         Train (or retrain) the classifier on images organised as:
@@ -69,8 +70,18 @@ class PlantClassifier:
 
         Saves the trained model and class index automatically.
         """
-        logger.info("Loading training data from %s", data_dir)
-        train_ds, val_ds = self._build_datasets(data_dir, batch_size, validation_split)
+        sparse = filter_sparse_classes(data_dir, min_samples_per_species)
+        if sparse:
+            logger.warning(
+                f"Excluding {len(sparse)} species with fewer than "
+                f"{min_samples_per_species} samples from training: {sparse}"
+            )
+
+        working_dir = config.MODELS_DIR / "_train_working_dir"
+        filtered_dir = build_filtered_training_dir(data_dir, working_dir, min_samples_per_species)
+
+        logger.info(f"Loading training data from {filtered_dir}")
+        train_ds, val_ds = self._build_datasets(filtered_dir, batch_size, validation_split)
 
         self.class_names = train_ds.class_names
         num_classes = len(self.class_names)

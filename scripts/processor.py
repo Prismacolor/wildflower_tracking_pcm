@@ -7,6 +7,7 @@ import csv
 from collections import Counter
 from pathlib import Path
 import cv2
+from tqdm import tqdm
 
 from scripts import config
 from scripts.plant_classifier import PlantClassifier
@@ -77,7 +78,7 @@ class SlidingWindowSegmenter:
         logger.info("Segmenting %d images from %s", len(images), stills_dir)
 
         all_patches: list[Path] = []
-        for img_path in images:
+        for img_path in tqdm(images, desc="Segmenting stills", unit="image"):
             patches = self.segment_image(img_path, output_dir)
             all_patches.extend(patches)
 
@@ -123,7 +124,7 @@ class PredictionPipeline:
     def _classify_patches(self, patches: list[Path]) -> list[dict]:
         """Classify each patch and return a list of result dicts."""
         results = []
-        for patch_path in patches:
+        for patch_path in tqdm(patches, desc="Classifying patches", unit="patch"):
             image = cv2.imread(str(patch_path))
             if image is None:
                 continue
