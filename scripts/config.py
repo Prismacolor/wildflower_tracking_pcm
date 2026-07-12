@@ -18,8 +18,6 @@ VISUALIZATIONS_DIR: Path = ROOT / "visualizations"
 ARTIFACTS_DIR: Path = VISUALIZATIONS_DIR / "artifacts"
 TREND_CHARTS_DIR: Path = VISUALIZATIONS_DIR / "trend_charts"
 
-SPECIES_TAGS_CSV: Path = DATA_DIR / "species_tags.csv"
-
 # Converting videos to stills
 FRAMES_PER_SECOND = 1          # extracted frames per second of video
 STILLS_FORMAT = "jpg"          # output image format
@@ -37,9 +35,9 @@ SEGMENT_FORMAT = "jpg"
 # Building the convolution model
 MODEL_INPUT_SIZE = (224, 224)   # (height, width) to feed into CNN
 MODEL_FILE: Path = MODELS_DIR / "plant_classifier.keras"
-CONFIDENCE_THRESHOLD = 0.60   # if model confidence is below this, classify as "unknown"
+CONFIDENCE_THRESHOLD = 0.70   # if model confidence is below this, classify as "unknown"
 BATCH_SIZE = 32
-EPOCHS = 30
+EPOCHS = 150
 VALIDATION_SPLIT = 0.2
 LEARNING_RATE = 1e-4
 DROPOUT_RATE = 0.4
@@ -47,17 +45,21 @@ DROPOUT_RATE = 0.4
 # Download data from iNaturalist
 INAT_API_BASE: str = "https://api.inaturalist.org/v1"
 
-# Rough bounding box for North Texas (swlat, swlng, nelat, nelng)
-INAT_BBOX = {
-    "swlat": 32.5,
-    "swlng": -98.0,
-    "nelat": 33.9,
-    "nelng": -96.0,
-}
+# Primary place — used for species_tags CSV naming and results scoping
+INAT_PRIMARY_PLACE_ID: str = "213020"
+
+# All places to download from — primary first, then supplemental.
+INAT_PLACE_IDS: list[str] = [
+    "213020",  # Prairie Creek Marsh and Wildscape
+    # "89246",  # Add supplemental place IDs here once identified
+]
 
 INAT_TAXON_ID = 47125          # iNat taxon ID for angiosperms (flowering plants)
-INAT_MAX_PHOTOS_PER_SPECIES = 100
+INAT_MAX_PHOTOS_PER_SPECIES = 150
 INAT_QUALITY_GRADE = "research"  # only research-grade observations
+INAT_MIN_PHOTOS_PER_SPECIES = 15
+
+SPECIES_TAGS_CSV: Path = DATA_DIR / f"species_tags_{INAT_PRIMARY_PLACE_ID}.csv"
 
 # Reporting / visualisation
 TOP_N_SPECIES = 5              # top-N chart in distribution report

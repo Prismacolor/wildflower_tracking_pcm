@@ -63,7 +63,7 @@ def cmd_spread(_args: argparse.Namespace) -> None:
 
 def cmd_train(_args: argparse.Namespace) -> None:
     """Train the plant classifier"""
-    PlantClassifier().train(data_dir=config.INAT_DIR)
+    PlantClassifier().train()
 
 
 def cmd_evaluate(_args: argparse.Namespace) -> None:
