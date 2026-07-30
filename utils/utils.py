@@ -1,7 +1,6 @@
 """
 Shared utility functions used across the wildflower tracking pipeline.
 """
-
 import csv
 import logging
 import shutil
@@ -80,24 +79,41 @@ def two_most_recent_files(directory: Path | str, pattern: str = "*.csv") -> tupl
     return files[0], files[1]
 
 
-def load_species_tags(csv_path: Path | str) -> dict[str, str]:
+def load_species_tags(
+        native_csv: Path | str | None = None,
+        invasive_csv: Path | str | None = None,
+) -> dict[str, str]:
     """
-    Load species_tags.csv and return a mapping of species_name → status.
+    Build a species_name -> status mapping by reading two CSVs:
+        native_plants_pcm.csv   -> status: 'native'
+        invasive_plants_pcm.csv -> status: 'invasive'
 
-    Expected CSV columns: species_name, status
-    Status values should be: 'native', 'invasive', or left blank (→ 'unknown').
+    Expected column in both files: scientific_name
+    Species not found in either file are returned as 'unknown' by lookup_status().
     """
-    csv_path = Path(csv_path)
+    from scripts import config as _config
+
+    native_csv = Path(native_csv or _config.NATIVE_PLANTS_CSV)
+    invasive_csv = Path(invasive_csv or _config.INVASIVE_PLANTS_CSV)
+
     mapping: dict[str, str] = {}
-    if not csv_path.exists():
-        return mapping
-    with csv_path.open(newline="", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            name = row.get("species_name", "").strip().lower()
-            status = row.get("status", "").strip().lower() or "unknown"
-            if name:
-                mapping[name] = status
+
+    def _read(csv_path: Path, status: str) -> None:
+        if not csv_path.exists():
+            get_logger(__name__).warning(f"Species CSV not found: {csv_path}")
+            return
+        seen: set[str] = set()
+        with csv_path.open(newline="", encoding="utf-8") as fh:
+            reader = csv.DictReader(fh)
+            for row in reader:
+                name = row.get("scientific_name", "").strip().lower()
+                if name and name not in seen:
+                    seen.add(name)
+                    mapping[name] = status
+
+    _read(native_csv, "native")
+    _read(invasive_csv, "invasive")  # invasive overwrites if somehow in both
+
     return mapping
 
 

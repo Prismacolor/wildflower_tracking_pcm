@@ -1,51 +1,49 @@
 """
-CNN-based plant classifier built on TensorFlow/Keras, using a pretrained
-EfficientNetB0 backbone (transfer learning) with a custom classification head.
+plant_classifier.py
+CNN-based plant classifier built on TensorFlow/Keras using a pretrained
+EfficientNetB4 backbone with a custom classification head.
 
-The PlantClassifier class wraps all model creation, training, evaluation,
-prediction, and persistence logic. Import it from main.py or processor.py.
-
-Training data is scoped by iNat place_id (data/iNat_data/<place_id>/), so
-switching restoration sites only requires changing config.INAT_PLACE_ID
+Pipeline:
+    1. augment_and_group()  — flip + rotate every photo, group by species
+                              across all places into data/augmented_data/
+    2. build_training_set() — filter species with < 25 photos, copy accepted
+                              species into data/training_data/
+    3. train()              — load training_data/, split 80/20, train model
+    4. save model           — saved to models/plant_classifier.keras
 """
 
 import json
+import shutil
 from pathlib import Path
-
+import cv2
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
-from tensorflow.keras.applications import EfficientNetB0
+from tensorflow.keras.applications import EfficientNetB4
 from tensorflow.keras.applications.efficientnet import preprocess_input
 
 from scripts import config
-from utils.utils import (
-    build_filtered_training_dir,
-    collect_images,
-    ensure_dir,
-    get_logger,
-)
+from utils.utils import collect_images, ensure_dir, get_logger
 
 logger = get_logger(__name__)
+
+# Directories for augmented and filtered training data
+AUGMENTED_DIR: Path = config.DATA_DIR / "augmented_data"
+TRAINING_DIR: Path = config.DATA_DIR / "training_data"
+MIN_PHOTOS: int = 25
 
 
 class PlantClassifier:
     """
-    Plant identifier built on a pretrained EfficientNetB0 backbone (frozen)
-    with a small trainable classification head. Transfer learning is used
-    because each prairie species typically only has a few dozen to a few
-    hundred training photos — far too few to train a deep CNN from scratch
-    without overfitting.
+    Plant identifier built on a pretrained EfficientNetB4 backbone with a
+    custom classification head.
 
-    Parameters
-    ----------
-    model_path:
-        Where to save / load the trained .keras model file.
-    input_size:
-        (height, width) fed into the network. Must match segmentation output.
-    confidence_threshold:
-        Predictions below this value are reported as "unknown".
+    Steps:
+        clf = PlantClassifier()
+        clf.augment_and_group()   # step 1 — augment and group by species
+        clf.build_training_set()  # step 2 — filter sparse species
+        clf.train()               # step 3 — train and save model
     """
 
     def __init__(
@@ -62,49 +60,172 @@ class PlantClassifier:
         self.class_names: list[str] = []
         self._class_index_path = self.model_path.parent / "class_index.json"
 
+    # ------------------------------------------------------------------
+    # Step 1 — Augmentation and grouping
+    # ------------------------------------------------------------------
+
+    def augment_and_group(
+        self,
+        inat_dir: Path = config.INAT_DIR,
+        place_ids: list[str] = config.INAT_PLACE_IDS,
+        output_dir: Path = AUGMENTED_DIR,
+    ) -> Path:
+        """
+        Loop through all place folders, group photos by species, and generate
+        three versions of each photo:
+            1. Original
+            2. Horizontal flip
+            3. 90° clockwise rotation
+
+        All versions are saved into output_dir/<species_name>/ so every
+        species folder contains photos from all places combined.
+
+        Safe to re-run — skips files that already exist.
+        """
+        ensure_dir(output_dir)
+        logger.info(f"Augmenting and grouping species from {len(place_ids)} place(s)...")
+
+        total_written = 0
+        for place_id in place_ids:
+            place_dir = Path(inat_dir) / place_id
+            if not place_dir.exists():
+                logger.warning(f"Place directory not found, skipping: {place_dir}")
+                continue
+
+            species_dirs = [d for d in place_dir.iterdir() if d.is_dir()]
+            logger.info(f"  Place {place_id}: {len(species_dirs)} species found")
+
+            for species_dir in species_dirs:
+                species_output = ensure_dir(output_dir / species_dir.name)
+                originals = [
+                    p for p in collect_images(species_dir)
+                    if not p.name.startswith("aug_")
+                ]
+
+                for img_path in originals:
+                    image = cv2.imread(str(img_path))
+                    if image is None:
+                        logger.warning(f"Could not read image, skipping: {img_path}")
+                        continue
+
+                    stem = f"{place_id}_{img_path.stem}"
+
+                    # 1. Original
+                    orig_dest = species_output / f"{stem}_orig{img_path.suffix}"
+                    if not orig_dest.exists():
+                        cv2.imwrite(str(orig_dest), image)
+                        total_written += 1
+
+                    # 2. Horizontal flip
+                    flip_dest = species_output / f"{stem}_hflip{img_path.suffix}"
+                    if not flip_dest.exists():
+                        flipped = cv2.flip(image, 1)
+                        cv2.imwrite(str(flip_dest), flipped)
+                        total_written += 1
+
+                    # 3. 90° clockwise rotation
+                    rot_dest = species_output / f"{stem}_rot90{img_path.suffix}"
+                    if not rot_dest.exists():
+                        rotated = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+                        cv2.imwrite(str(rot_dest), rotated)
+                        total_written += 1
+
+        logger.info(f"Augmentation complete. {total_written} files written to {output_dir}")
+        return output_dir
+
+    # ------------------------------------------------------------------
+    # Step 2 — Build filtered training set
+    # ------------------------------------------------------------------
+
+    def build_training_set(
+        self,
+        augmented_dir: Path = AUGMENTED_DIR,
+        output_dir: Path = TRAINING_DIR,
+        min_photos: int = MIN_PHOTOS,
+    ) -> Path:
+        """
+        Count photos in each species folder in augmented_dir. Species with
+        fewer than min_photos total are excluded. Accepted species are copied
+        into output_dir/<species_name>/ for use as the training/validation set.
+
+        Safe to re-run — rebuilds output_dir from scratch each time to stay
+        in sync if augmented_data changes.
+        """
+        if output_dir.exists():
+            shutil.rmtree(output_dir)
+        ensure_dir(output_dir)
+
+        species_dirs = [d for d in Path(augmented_dir).iterdir() if d.is_dir()]
+        included = []
+        excluded = []
+
+        for species_dir in species_dirs:
+            count = len(collect_images(species_dir))
+            if count < min_photos:
+                excluded.append((species_dir.name, count))
+            else:
+                included.append((species_dir.name, count))
+                shutil.copytree(species_dir, output_dir / species_dir.name)
+
+        logger.info(
+            f"Training set built: {len(included)} species included, "
+            f"{len(excluded)} excluded (< {min_photos} photos)"
+        )
+        if excluded:
+            logger.info(
+                f"Excluded species: "
+                f"{[f'{n} ({c})' for n, c in sorted(excluded)]}"
+            )
+
+        return output_dir
+
+    # ------------------------------------------------------------------
+    # Step 3 — Train
+    # ------------------------------------------------------------------
 
     def train(
         self,
-        place_ids: list = config.INAT_PLACE_IDS,
+        training_dir: Path = TRAINING_DIR,
         epochs: int = config.EPOCHS,
         batch_size: int = config.BATCH_SIZE,
         validation_split: float = config.VALIDATION_SPLIT,
         learning_rate: float = config.LEARNING_RATE,
-        min_samples_per_species: int = config.INAT_MIN_PHOTOS_PER_SPECIES,
     ) -> keras.callbacks.History:
         """
-        Train (or retrain) the classifier on images organised as:
-            data/iNat_data/<place_id>/<species_name>/<image_files>
-
-        Species with fewer than min_samples_per_species images are excluded
-        from training and logged, but never deleted from disk. Class weights
-        are computed so rarer species contribute proportionally to the loss.
-
-        Saves the trained model and class index automatically.
+        Load images from training_dir, split 80/20 into train/val datasets
+        ensuring every species is represented in both splits, build and compile
+        EfficientNetB4, train, and save the model.
         """
-        working_dir = config.MODELS_DIR / "_train_working_dir"
-        filtered_dir = build_filtered_training_dir(
-            inat_base_dir=config.INAT_DIR,
-            place_ids=place_ids,
-            working_dir=working_dir,
-            min_samples=min_samples_per_species,
-        )
+        if not Path(training_dir).exists():
+            raise FileNotFoundError(
+                f"Training directory not found: {training_dir}. "
+                "Run augment_and_group() then build_training_set() first."
+            )
 
-        logger.info(f"Loading training data from {filtered_dir}")
+        logger.info(f"Loading training data from {training_dir}")
         train_ds, val_ds, class_names = self._build_datasets(
-            filtered_dir, batch_size, validation_split
+            training_dir, batch_size, validation_split
         )
 
         self.class_names = class_names
         num_classes = len(self.class_names)
-        logger.info(f"Classes found: {num_classes}")
+        logger.info(f"Training on {num_classes} species")
 
-        class_weights = self._compute_class_weights(filtered_dir, class_names)
         self.model = self._build_model(num_classes, learning_rate)
 
         callbacks = [
-            keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True),
-            keras.callbacks.ReduceLROnPlateau(factor=0.5, patience=3),
+            keras.callbacks.EarlyStopping(
+                monitor="val_accuracy",
+                patience=7,
+                restore_best_weights=True,
+                verbose=1,
+            ),
+            keras.callbacks.ReduceLROnPlateau(
+                monitor="val_loss",
+                factor=0.5,
+                patience=3,
+                verbose=1,
+            ),
         ]
 
         history = self.model.fit(
@@ -112,135 +233,51 @@ class PlantClassifier:
             validation_data=val_ds,
             epochs=epochs,
             callbacks=callbacks,
-            class_weight=class_weights,
         )
 
         self._save()
         logger.info(f"Training complete. Model saved to {self.model_path}")
         return history
 
-    def finetune(
-            self,
-            place_ids: list[str] = config.INAT_PLACE_IDS,
-            epochs: int = 20,
-            learning_rate: float = 1e-5,
-            unfreeze_layers: int = 20,
-            batch_size: int = config.BATCH_SIZE,
-            validation_split: float = config.VALIDATION_SPLIT,
-    ) -> keras.callbacks.History:
-        """
-        Fine-tune the top layers of the EfficientNetB0 backbone after initial
-        training. Unfreezes the top N layers of the frozen backbone and trains
-        at a very low learning rate so pretrained weights are adjusted gently
-        rather than overwritten.
-
-        Call this after train() has converged. Model must already be loaded
-        or trained before calling this.
-        """
-        self._require_model()
-
-        base_model = self.model.layers[1]  # EfficientNetB0 is the second layer
-        base_model.trainable = True
-
-        for layer in base_model.layers[:-unfreeze_layers]:
-            layer.trainable = False
-
-        trainable_count = sum(1 for l in base_model.layers if l.trainable)
-        logger.info(
-            f"Fine-tuning: unfroze top {unfreeze_layers} of "
-            f"{len(base_model.layers)} EfficientNet layers "
-            f"({trainable_count} trainable layers total)"
-        )
-
-        self.model.compile(
-            optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
-            loss="sparse_categorical_crossentropy",
-            metrics=["accuracy"],
-        )
-
-        working_dir = config.MODELS_DIR / "_train_working_dir"
-        filtered_dir = build_filtered_training_dir(
-            inat_base_dir=config.INAT_DIR,
-            place_ids=place_ids,
-            working_dir=working_dir,
-            min_samples=config.INAT_MIN_PHOTOS_PER_SPECIES,
-        )
-
-        train_ds, val_ds, _ = self._build_datasets(
-            filtered_dir,
-            batch_size,
-            validation_split,
-            class_names=self.class_names,
-        )
-
-        callbacks = [
-            keras.callbacks.EarlyStopping(patience=5, restore_best_weights=True),
-            keras.callbacks.ReduceLROnPlateau(factor=0.5, patience=3),
-        ]
-
-        history = self.model.fit(
-            train_ds,
-            validation_data=val_ds,
-            epochs=epochs,
-            callbacks=callbacks,
-        )
-
-        self._save()
-        logger.info(f"Fine-tuning complete. Model saved to {self.model_path}")
-        return history
+    # ------------------------------------------------------------------
+    # Evaluation
+    # ------------------------------------------------------------------
 
     def evaluate(
         self,
-        place_ids: list = config.INAT_PLACE_IDS,
+        training_dir: Path = TRAINING_DIR,
         batch_size: int = config.BATCH_SIZE,
     ) -> dict[str, float]:
         """
-        Evaluate the model on a held-out validation split, using data from
-        data/iNat_data/<place_id>/.
-
-        Uses the exact class list saved at training time (self.class_names)
-        so label indices always line up with the loaded model, regardless
-        of new or sparse species folders present in data_dir.
-
-        Returns a dict with 'loss' and 'accuracy'.
+        Evaluate the model on the validation split of training_dir.
+        Uses the exact class list saved at training time.
         """
-        working_dir = config.MODELS_DIR / "_eval_working_dir"
-        filtered_dir = build_filtered_training_dir(
-            inat_base_dir=config.INAT_DIR,
-            place_ids=place_ids,
-            working_dir=working_dir,
-            min_samples=config.INAT_MIN_PHOTOS_PER_SPECIES,
-        )
+        self._require_model()
 
         _, val_ds, _ = self._build_datasets(
-            filtered_dir,
+            training_dir,
             batch_size,
             validation_split=config.VALIDATION_SPLIT,
             class_names=self.class_names,
         )
-
         loss, accuracy = self.model.evaluate(val_ds, verbose=0)
         metrics = {"loss": float(loss), "accuracy": float(accuracy)}
         logger.info(f"Evaluation — loss: {loss:.4f}  accuracy: {accuracy:.4f}")
         return metrics
 
+    # ------------------------------------------------------------------
+    # Prediction
+    # ------------------------------------------------------------------
+
     def predict_image(self, image: np.ndarray) -> tuple[str, float]:
         """
-        Predict the species of a single pre-processed image array.
-
-        Parameters
-        ----------
-        image:
-            NumPy array of shape (H, W, 3), uint8 or float32, RGB order.
-
-        Returns
-        -------
-        (species_name, confidence)
-            species_name is "unknown" when confidence < threshold.
+        Predict the species of a single image array (H, W, 3), RGB order.
+        Returns (species_name, confidence).
+        species_name is 'unknown' when confidence < threshold.
         """
         self._require_model()
         img = self._preprocess(image)
-        img = np.expand_dims(img, axis=0)   # (1, H, W, 3)
+        img = np.expand_dims(img, axis=0)
         probs = self.model.predict(img, verbose=0)[0]
         idx = int(np.argmax(probs))
         confidence = float(probs[idx])
@@ -251,6 +288,10 @@ class PlantClassifier:
         """Run predict_image over a list of images."""
         return [self.predict_image(img) for img in images]
 
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
     def load(self) -> None:
         """Load a previously trained model and class index from disk."""
         if not self.model_path.exists():
@@ -260,6 +301,10 @@ class PlantClassifier:
             self.class_names = json.load(fh)
         logger.info(f"Model loaded from {self.model_path} ({len(self.class_names)} classes)")
 
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
     def _build_datasets(
         self,
         data_dir: Path,
@@ -268,12 +313,9 @@ class PlantClassifier:
         class_names: list[str] | None = None,
     ) -> tuple[tf.data.Dataset, tf.data.Dataset, list[str]]:
         """
-        Build train/val tf.data.Dataset objects with augmentation and
-        EfficientNet preprocessing.
-
-        If class_names is provided, the dataset is restricted to exactly
-        those classes (in that order) — used by evaluate() to guarantee
-        label alignment with a previously trained model.
+        Build train/val datasets from data_dir with EfficientNetB4 preprocessing.
+        Uses a fixed seed so the 80/20 split is reproducible and every species
+        appears in both splits.
         """
         h, w = self.input_size
 
@@ -298,21 +340,11 @@ class PlantClassifier:
 
         resolved_class_names = train_ds.class_names   # capture BEFORE .map()
 
-        augmentation = keras.Sequential([
-            layers.RandomFlip("horizontal_and_vertical"),
-            layers.RandomRotation(0.2),
-            layers.RandomZoom(0.15),
-            layers.RandomBrightness(0.1),
-        ])
-
         def prepare_train(x, y):
-            x = augmentation(x, training=True)
-            x = preprocess_input(x)
-            return x, y
+            return preprocess_input(x), y
 
         def prepare_val(x, y):
-            x = preprocess_input(x)
-            return x, y
+            return preprocess_input(x), y
 
         AUTOTUNE = tf.data.AUTOTUNE
         train_ds = train_ds.map(prepare_train, num_parallel_calls=AUTOTUNE).prefetch(AUTOTUNE)
@@ -322,60 +354,39 @@ class PlantClassifier:
 
     def _build_model(self, num_classes: int, learning_rate: float) -> keras.Model:
         """
-        Construct a transfer-learning classifier using a pretrained
-        EfficientNetB0 backbone (frozen) with a custom classification head.
-        Freezing the backbone keeps the trainable parameter count small,
-        which helps avoid overfitting on a few dozen-to-hundred photos
-        per species.
+        EfficientNetB4 backbone (frozen, pretrained ImageNet weights) with a
+        custom classification head for num_classes plant species.
         """
         h, w = self.input_size
-        inputs = keras.Input(shape=(h, w, 3))
 
-        base_model = EfficientNetB0(
+        base_model = EfficientNetB4(
             include_top=False,
             weights="imagenet",
             input_shape=(h, w, 3),
-            pooling="avg",
         )
-        base_model.trainable = False   # freeze pretrained weights
+        base_model.trainable = False
 
-        x = base_model(inputs, training=False)
-        x = layers.Dense(256, activation="relu")(x)
-        x = layers.Dropout(config.DROPOUT_RATE)(x)
-        outputs = layers.Dense(num_classes, activation="softmax")(x)
+        x = base_model.output
+        x = layers.GlobalAveragePooling2D(name="avg_pool")(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.Dropout(config.DROPOUT_RATE, name="top_dropout")(x)
+        outputs = layers.Dense(num_classes, activation="softmax", name="predictions")(x)
 
-        model = keras.Model(inputs, outputs, name="plant_classifier")
+        model = keras.Model(
+            inputs=base_model.input,
+            outputs=outputs,
+            name="plant_classifier",
+        )
         model.compile(
             optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
-            loss="sparse_categorical_crossentropy",
+            loss=keras.losses.SparseCategoricalCrossentropy(),
             metrics=["accuracy"],
         )
         model.summary(print_fn=logger.info)
         return model
 
-    def _compute_class_weights(self, data_dir: Path, class_names: list[str]) -> dict[int, float]:
-        """
-        Compute class weights inversely proportional to class frequency,
-        so rare prairie species contribute as much to the loss as common
-        ones rather than being drowned out.
-        """
-        counts = []
-        for name in class_names:
-            species_dir = Path(data_dir) / name
-            counts.append(len(collect_images(species_dir)))
-
-        total = sum(counts)
-        num_classes = len(class_names)
-
-        weights = {
-            idx: total / (num_classes * count) if count > 0 else 1.0
-            for idx, count in enumerate(counts)
-        }
-        return weights
-
     def _preprocess(self, image: np.ndarray) -> np.ndarray:
-        """Resize and apply EfficientNet preprocessing to a single image."""
-        import cv2
+        """Resize and apply EfficientNetB4 preprocessing to a single image."""
         h, w = self.input_size
         resized = cv2.resize(image, (w, h)).astype(np.float32)
         return preprocess_input(resized)

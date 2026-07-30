@@ -1,14 +1,13 @@
 """
 Downloads iNaturalist research-grade angiosperm (flowering plant) observations
-for a configured iNat "Place", and saves the photos into
+for multiples spaces, and saves the photos into
 data/iNat_data/<place_id>/<species_name>/.
 
 Scoping downloads by place_id (rather than hard-coding one location) means
 this project can be reused for other restoration sites — just change
-INAT_PLACE_ID in config.py and re-run the download.
+INAT_PLACE_IDs in config.py and re-run the download.
 """
 
-import csv
 import time
 import urllib.request
 from pathlib import Path
@@ -24,36 +23,34 @@ logger = get_logger(__name__)
 _OBSERVATIONS_ENDPOINT = f"{config.INAT_API_BASE}/observations"
 _PAGE_SIZE = 200
 _INAT_MAX_OFFSET = 10_000   # iNat hard cap — API returns 403 beyond this
-_REQUEST_DELAY = 1.0        # seconds between API calls — be polite to iNat
+_REQUEST_DELAY = 1.5       # seconds between API calls — be polite to iNat
 
 
 class INatDownloader:
     """
-    Fetches plant observations via the iNaturalist v1 API, scoped to a
-    configured iNat place, and downloads the associated photos, organised
-    by place_id then species. Also auto-populates that place's
-    species_tags_<place_id>.csv with native/invasive status when iNat
-    provides it.
+    Fetches plant observations via the iNaturalist v1 API for one place
+    and downloads the associated photos, organised by species.
+
+    INatDownloader is scoped to a single place_id. The top-level
+    download_all_places() function loops over all configured places.
     """
 
     def __init__(
-        self,
-        output_dir: Path = config.INAT_DIR,
-        place_id: str = config.INAT_PLACE_ID,
-        taxon_id: int = config.INAT_TAXON_ID,
-        max_photos_per_species: int = config.INAT_MAX_PHOTOS_PER_SPECIES,
-        quality_grade: str = config.INAT_QUALITY_GRADE,
+            self,
+            place_id: str,
+            output_dir: Path = config.INAT_DIR,
+            taxon_id: int = config.INAT_TAXON_ID,
+            max_photos_per_species: int = config.INAT_MAX_PHOTOS_PER_SPECIES,
+            quality_grade: str = config.INAT_QUALITY_GRADE,
     ) -> None:
         self.place_id = place_id
         self.output_dir = Path(output_dir) / self.place_id
         self.taxon_id = taxon_id
         self.max_photos = max_photos_per_species
         self.quality_grade = quality_grade
-        self.species_tags_path = config.DATA_DIR / f"species_tags_{self.place_id}.csv"
-
 
     def run(self) -> None:
-        """Download photos for all species found at the configured place."""
+        """Download photos for all species found at this place."""
         ensure_dir(self.output_dir)
         logger.info(f"Starting iNat download — place_id: {self.place_id}")
         logger.info(f"Saving photos to: {self.output_dir}")
@@ -64,13 +61,14 @@ class INatDownloader:
         species_map = self._group_by_species(observations)
         logger.info(f"Unique species found: {len(species_map)}")
 
-        self._update_species_tags(species_map)
+        for species, urls in tqdm(
+                species_map.items(),
+                desc=f"Downloading place {self.place_id}",
+                unit="species",
+        ):
+            self._download_species_photos(species, urls)
 
-        for species, data in tqdm(species_map.items(), desc="Downloading species", unit="species"):
-            self._download_species_photos(species, data["urls"])
-
-        logger.info("iNat download complete.")
-
+        logger.info(f"Download complete for place_id: {self.place_id}")
 
     def _fetch_all_observations(self) -> list[dict]:
         """
@@ -81,13 +79,8 @@ class INatDownloader:
         page = 1
 
         while True:
-            # iNat counts from offset = (page-1) * per_page
-            # Stop before we hit the 403 wall
             if (page - 1) * _PAGE_SIZE >= _INAT_MAX_OFFSET:
-                logger.info(
-                    "Reached iNat's 10,000 observation cap — stopping pagination. "
-                    "To get more data, narrow your place scope or filter by taxon."
-                )
+                logger.info("Reached iNat's 10,000 observation cap — stopping pagination.")
                 break
 
             params = {
@@ -101,10 +94,10 @@ class INatDownloader:
 
             response = requests.get(_OBSERVATIONS_ENDPOINT, params=params, timeout=30)
 
-            if response.status_code == 403:   # we have hit the 10k limit for iNat
+            if response.status_code == 403:
                 logger.info("We have hit the 10k download limit for iNat, stopping download...")
                 break
-            elif response.status_code != 200:  # catch any other http errors
+            elif response.status_code != 200:
                 logger.warning(f"Error while downloading: {response.status_code}")
                 continue
 
@@ -128,16 +121,12 @@ class INatDownloader:
 
         return observations
 
-    def _group_by_species(self, observations: list[dict]) -> dict[str, dict]:
+    def _group_by_species(self, observations: list[dict]) -> dict[str, list[str]]:
         """
-        Return a dict mapping species_name -> {urls: [...], status: str}.
+        Return a dict mapping species_name -> list of photo URLs.
         Caps each species at self.max_photos.
-
-        status is derived from iNat's establishment_means field when
-        available: 'introduced' -> 'invasive', 'native'/'endemic' -> 'native',
-        otherwise left blank for manual review.
         """
-        species_map: dict[str, dict] = {}
+        species_map: dict[str, list[str]] = {}
 
         for obs in observations:
             taxon = obs.get("taxon")
@@ -148,59 +137,17 @@ class INatDownloader:
             if not name:
                 continue
 
-            establishment = taxon.get("establishment_means", {}) or {}
-            status = establishment.get("establishment_means", "").lower()
-            if status == "introduced":
-                status = "invasive"
-            elif status not in ("native", "endemic"):
-                status = ""   # leave blank if unknown — fill in manually later
-
             photos = obs.get("photos", [])
-            species_map.setdefault(name, {"urls": [], "status": status})
+            species_map.setdefault(name, [])
             for photo in photos:
                 url = photo.get("url", "")
                 if not url:
                     continue
-                # iNat thumbnail URLs end in /square — swap for /large
                 url = url.replace("/square", "/large")
-                if len(species_map[name]["urls"]) < self.max_photos:
-                    species_map[name]["urls"].append(url)
+                if len(species_map[name]) < self.max_photos:
+                    species_map[name].append(url)
 
         return species_map
-
-    def _update_species_tags(self, species_map: dict[str, dict]) -> None:
-        """
-        Write any newly discovered species and their iNat status into
-        this place's species_tags_<place_id>.csv. Existing rows are
-        preserved and never overwritten.
-        """
-        csv_path = self.species_tags_path
-        existing = load_species_tags(csv_path)
-
-        if not csv_path.exists():
-            ensure_dir(csv_path.parent)
-            with csv_path.open("w", newline="", encoding="utf-8") as fh:
-                writer = csv.DictWriter(fh, fieldnames=["species_name", "status"])
-                writer.writeheader()
-
-        new_rows = []
-        for name, data in species_map.items():
-            readable_name = name.replace("_", " ")
-            if readable_name not in existing:
-                new_rows.append({
-                    "species_name": readable_name,
-                    "status": data["status"],
-                })
-
-        if not new_rows:
-            logger.info(f"{csv_path.name} is already up to date.")
-            return
-
-        with csv_path.open("a", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=["species_name", "status"])
-            writer.writerows(new_rows)
-
-        logger.info(f"Added {len(new_rows)} new species to {csv_path.name}.")
 
     def _download_species_photos(self, species: str, urls: list[str]) -> None:
         """Download photos for a single species into its own subdirectory."""
@@ -215,16 +162,31 @@ class INatDownloader:
             try:
                 urllib.request.urlretrieve(url, dest)
                 downloaded += 1
-                time.sleep(0.2)   # light throttle for photo downloads
+                time.sleep(0.2)
             except Exception as exc:
                 logger.warning(f"Failed to download {url}: {exc}")
 
-        logger.info(f"  {species} — downloaded {downloaded} new photos ({existing} already present)")
+        logger.info(
+            f"  {species} — downloaded {downloaded} new photos "
+            f"({existing} already present)"
+        )
+
+def download_all_places(place_ids: list[str] = config.INAT_PLACE_IDS) -> None:
+    """
+    Download iNat photos for every place in place_ids, one at a time.
+    Already-downloaded photos are skipped, so this is safe to re-run.
+    """
+    logger.info(f"Downloading data for {len(place_ids)} place(s): {place_ids}")
+    for idx, place_id in enumerate(place_ids, start=1):
+        logger.info(f"\n{'=' * 50}")
+        logger.info(f"Place {idx} of {len(place_ids)}: {place_id}")
+        logger.info(f"{'=' * 50}")
+        INatDownloader(place_id=place_id).run()
+    logger.info("All places downloaded.")
 
 
 def main() -> None:
-    downloader = INatDownloader()
-    downloader.run()
+    download_all_places()
 
 
 if __name__ == "__main__":

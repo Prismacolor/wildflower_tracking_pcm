@@ -45,21 +45,21 @@ DROPOUT_RATE = 0.4
 # Download data from iNaturalist
 INAT_API_BASE: str = "https://api.inaturalist.org/v1"
 
-# Primary place — used for species_tags CSV naming and results scoping
-INAT_PRIMARY_PLACE_ID: str = "213020"
-
 # All places to download from — primary first, then supplemental.
 INAT_PLACE_IDS: list[str] = [
     "213020",  # Prairie Creek Marsh and Wildscape
-    # "89246",  # Add supplemental place IDs here once identified
+    "175135",  # Blackland Prairie, Collin County
+    # "176015",  # Blackland Prairie, Hunt County
+    # "175686"  # Blackland Prairie, Grayson County
 ]
 
 INAT_TAXON_ID = 47125          # iNat taxon ID for angiosperms (flowering plants)
-INAT_MAX_PHOTOS_PER_SPECIES = 150
+INAT_MAX_PHOTOS_PER_SPECIES = 250
 INAT_QUALITY_GRADE = "research"  # only research-grade observations
-INAT_MIN_PHOTOS_PER_SPECIES = 15
 
-SPECIES_TAGS_CSV: Path = DATA_DIR / f"species_tags_{INAT_PRIMARY_PLACE_ID}.csv"
+# Species tags file is scoped to the primary place
+NATIVE_PLANTS_CSV: Path = DATA_DIR / "native_plants_pcm.csv"
+INVASIVE_PLANTS_CSV: Path = DATA_DIR / "invasive_plants_pcm.csv"
 
 # Reporting / visualisation
 TOP_N_SPECIES = 5              # top-N chart in distribution report

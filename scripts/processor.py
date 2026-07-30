@@ -21,8 +21,8 @@ from utils.utils import (
     timestamp,
 )
 
-
 logger = get_logger(__name__)
+
 
 class SlidingWindowSegmenter:
     """
@@ -37,9 +37,9 @@ class SlidingWindowSegmenter:
     """
 
     def __init__(
-        self,
-        window_configs: list[tuple[int, int]] = config.WINDOW_CONFIGS,
-        output_format: str = config.SEGMENT_FORMAT,
+            self,
+            window_configs: list[tuple[int, int]] = config.WINDOW_CONFIGS,
+            output_format: str = config.SEGMENT_FORMAT,
     ) -> None:
         self.window_configs = window_configs
         self.output_format = output_format
@@ -63,8 +63,8 @@ class SlidingWindowSegmenter:
                 for x in range(0, w - win_size + 1, step):
                     patch = image[y: y + win_size, x: x + win_size]
                     fname = (
-                        output_dir
-                        / f"{stem}_w{win_size}_y{y:04d}_x{x:04d}.{self.output_format}"
+                            output_dir
+                            / f"{stem}_w{win_size}_y{y:04d}_x{x:04d}.{self.output_format}"
                     )
                     cv2.imwrite(str(fname), patch)
                     saved.append(fname)
@@ -93,15 +93,15 @@ class PredictionPipeline:
     """
 
     def __init__(
-        self,
-        segmented_base: Path = config.SEGMENTED_DIR,
-        results_dir: Path = config.RESULTS_DIR,
-        species_tags_path: Path = config.SPECIES_TAGS_CSV,
-        confidence_threshold: float = config.CONFIDENCE_THRESHOLD,
+            self,
+            segmented_base: Path = config.SEGMENTED_DIR,
+            results_dir: Path = config.RESULTS_DIR,
+            species_tags_path: Path | None = None,
+            confidence_threshold: float = config.CONFIDENCE_THRESHOLD,
     ) -> None:
         self.segmented_base = Path(segmented_base)
         self.results_dir = Path(results_dir)
-        self.species_tags = load_species_tags(species_tags_path)
+        self.species_tags = load_species_tags()
         self.confidence_threshold = confidence_threshold
         self.classifier = PlantClassifier(confidence_threshold=confidence_threshold)
 
@@ -119,7 +119,6 @@ class PredictionPipeline:
         predictions = self._classify_patches(patches)
         report_path = self._save_report(predictions)
         return report_path
-
 
     def _classify_patches(self, patches: list[Path]) -> list[dict]:
         """Classify each patch and return a list of result dicts."""

@@ -28,7 +28,7 @@ from scripts.processor import SlidingWindowSegmenter, PredictionPipeline
 from scripts.plant_classifier import PlantClassifier
 from visualizations.charts import main as charts_main
 from visualizations.spread_tracker import main as spread_main
-from utils.setup_inat import INatDownloader
+from utils.setup_inat import download_all_places
 
 
 logger = get_logger(__name__)
@@ -45,25 +45,9 @@ def cmd_segment(_args: argparse.Namespace) -> None:
     SlidingWindowSegmenter().segment_directory(stills_dir, out_dir)
 
 
-def cmd_predict(_args: argparse.Namespace) -> None:
-    """Inference"""
-    report = PredictionPipeline().run()
-    print(f"Results: {report}")
-
-
-def cmd_charts(_args: argparse.Namespace) -> None:
-    """Build the visualization charts"""
-    charts_main()
-
-
-def cmd_spread(_args: argparse.Namespace) -> None:
-    """Track the spread"""
-    spread_main()
-
-
-def cmd_train(_args: argparse.Namespace) -> None:
-    """Train the plant classifier"""
-    PlantClassifier().train()
+def cmd_download(_args: argparse.Namespace) -> None:
+    """Download iNat data"""
+    download_all_places()
 
 
 def cmd_evaluate(_args: argparse.Namespace) -> None:
@@ -74,9 +58,29 @@ def cmd_evaluate(_args: argparse.Namespace) -> None:
     print(f"Loss: {metrics['loss']:.4f}  Accuracy: {metrics['accuracy']:.4f}")
 
 
-def cmd_download(_args: argparse.Namespace) -> None:
-    """Download iNat data"""
-    INatDownloader().run()
+def cmd_augment(_args: argparse.Namespace) -> None:
+    """Augment and group iNat photos by species across all places."""
+    from scripts.plant_classifier import PlantClassifier
+    PlantClassifier().augment_and_group()
+
+
+def cmd_build_training(_args: argparse.Namespace) -> None:
+    """Filter sparse species and build the training_data directory."""
+    PlantClassifier().build_training_set()
+
+
+def cmd_train(_args: argparse.Namespace) -> None:
+    """Augment photos, build training set, and train the plant classifier."""
+    clf = PlantClassifier()
+    clf.augment_and_group()
+    clf.build_training_set()
+    clf.train()
+
+
+def cmd_predict(_args: argparse.Namespace) -> None:
+    """Inference"""
+    report = PredictionPipeline().run()
+    print(f"Results: {report}")
 
 
 def cmd_model_pipeline(_args:argparse.Namespace) -> None:
@@ -85,6 +89,15 @@ def cmd_model_pipeline(_args:argparse.Namespace) -> None:
     cmd_evaluate(_args)
     cmd_predict(_args)
 
+
+def cmd_charts(_args: argparse.Namespace) -> None:
+    """Build the visualization charts"""
+    charts_main()
+
+
+def cmd_spread(_args: argparse.Namespace) -> None:
+    """Track the spread"""
+    spread_main()
 
 def cmd_chart_spread(_args: argparse.Namespace) -> None:
     """Sometimes segmentation takes a while so it is run separately. Might want separate smaller pipelines."""
@@ -115,9 +128,11 @@ _COMMANDS = {
     "predict": cmd_predict,
     "charts": cmd_charts,
     "spread": cmd_spread,
-    "train": cmd_train,
     "evaluate": cmd_evaluate,
     "download": cmd_download,
+    "augment":  cmd_augment,
+    "build_training": cmd_build_training,
+    "train":  cmd_train,
     "model": cmd_model_pipeline,
     "spread_charts": cmd_chart_spread,
     "full": cmd_full,
