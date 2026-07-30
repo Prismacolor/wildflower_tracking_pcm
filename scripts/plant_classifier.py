@@ -42,7 +42,7 @@ class PlantClassifier:
     Steps:
         clf = PlantClassifier()
         clf.augment_and_group()   # step 1 — augment and group by species
-        clf.build_training_set()  # step 2 — filter sparse species
+        clf.build_training_set()  # step 2 — filter out sparse species
         clf.train()               # step 3 — train and save model
     """
 
@@ -60,30 +60,40 @@ class PlantClassifier:
         self.class_names: list[str] = []
         self._class_index_path = self.model_path.parent / "class_index.json"
 
-    # ------------------------------------------------------------------
-    # Step 1 — Augmentation and grouping
-    # ------------------------------------------------------------------
-
     def augment_and_group(
-        self,
-        inat_dir: Path = config.INAT_DIR,
-        place_ids: list[str] = config.INAT_PLACE_IDS,
-        output_dir: Path = AUGMENTED_DIR,
+            self,
+            inat_dir: Path = config.INAT_DIR,
+            place_ids: list[str] = config.INAT_PLACE_IDS,
+            output_dir: Path = AUGMENTED_DIR,
     ) -> Path:
         """
-        Loop through all place folders, group photos by species, and generate
-        three versions of each photo:
+        Group and augment photos by species across all places, using the first
+        place in place_ids as the primary (left) — only species present in the
+        primary place are included.
+
+        Three versions of each photo are generated:
             1. Original
             2. Horizontal flip
             3. 90° clockwise rotation
 
-        All versions are saved into output_dir/<species_name>/ so every
-        species folder contains photos from all places combined.
-
         Safe to re-run — skips files that already exist.
         """
         ensure_dir(output_dir)
-        logger.info(f"Augmenting and grouping species from {len(place_ids)} place(s)...")
+
+        primary_id = place_ids[0]
+        primary_dir = Path(inat_dir) / primary_id
+
+        if not primary_dir.exists():
+            raise FileNotFoundError(
+                f"Primary place directory not found: {primary_dir}"
+            )
+
+        # Build the species set from the primary place only
+        primary_species = {d.name for d in primary_dir.iterdir() if d.is_dir()}
+        logger.info(
+            f"Primary place {primary_id}: {len(primary_species)} species — "
+            f"supplemental places will be filtered to match"
+        )
 
         total_written = 0
         for place_id in place_ids:
@@ -92,8 +102,19 @@ class PlantClassifier:
                 logger.warning(f"Place directory not found, skipping: {place_dir}")
                 continue
 
+            is_primary = place_id == primary_id
             species_dirs = [d for d in place_dir.iterdir() if d.is_dir()]
-            logger.info(f"  Place {place_id}: {len(species_dirs)} species found")
+
+            # For supplemental places, only process species in the primary set
+            if not is_primary:
+                before = len(species_dirs)
+                species_dirs = [d for d in species_dirs if d.name in primary_species]
+                logger.info(
+                    f"  Place {place_id}: {len(species_dirs)} of {before} species "
+                    f"match primary — including those only"
+                )
+            else:
+                logger.info(f"  Place {place_id} (primary): {len(species_dirs)} species")
 
             for species_dir in species_dirs:
                 species_output = ensure_dir(output_dir / species_dir.name)
@@ -130,12 +151,11 @@ class PlantClassifier:
                         cv2.imwrite(str(rot_dest), rotated)
                         total_written += 1
 
-        logger.info(f"Augmentation complete. {total_written} files written to {output_dir}")
+        logger.info(
+            f"Augmentation complete. {total_written} files written to {output_dir}"
+        )
         return output_dir
 
-    # ------------------------------------------------------------------
-    # Step 2 — Build filtered training set
-    # ------------------------------------------------------------------
 
     def build_training_set(
         self,
@@ -179,9 +199,6 @@ class PlantClassifier:
 
         return output_dir
 
-    # ------------------------------------------------------------------
-    # Step 3 — Train
-    # ------------------------------------------------------------------
 
     def train(
         self,
@@ -239,9 +256,6 @@ class PlantClassifier:
         logger.info(f"Training complete. Model saved to {self.model_path}")
         return history
 
-    # ------------------------------------------------------------------
-    # Evaluation
-    # ------------------------------------------------------------------
 
     def evaluate(
         self,
@@ -265,9 +279,6 @@ class PlantClassifier:
         logger.info(f"Evaluation — loss: {loss:.4f}  accuracy: {accuracy:.4f}")
         return metrics
 
-    # ------------------------------------------------------------------
-    # Prediction
-    # ------------------------------------------------------------------
 
     def predict_image(self, image: np.ndarray) -> tuple[str, float]:
         """
@@ -288,9 +299,6 @@ class PlantClassifier:
         """Run predict_image over a list of images."""
         return [self.predict_image(img) for img in images]
 
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
 
     def load(self) -> None:
         """Load a previously trained model and class index from disk."""
@@ -301,9 +309,6 @@ class PlantClassifier:
             self.class_names = json.load(fh)
         logger.info(f"Model loaded from {self.model_path} ({len(self.class_names)} classes)")
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _build_datasets(
         self,
@@ -346,7 +351,7 @@ class PlantClassifier:
         def prepare_val(x, y):
             return preprocess_input(x), y
 
-        AUTOTUNE = tf.data.AUTOTUNE
+        AUTOTUNE = tf.data.AUTOTUNE  # autotune helps optimize resources at runtime
         train_ds = train_ds.map(prepare_train, num_parallel_calls=AUTOTUNE).prefetch(AUTOTUNE)
         val_ds = val_ds.map(prepare_val, num_parallel_calls=AUTOTUNE).prefetch(AUTOTUNE)
 
